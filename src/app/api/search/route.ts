@@ -104,6 +104,9 @@ export async function POST(request: Request) {
       // Extract duration for video/audio content
       const duration = match.metadata?.duration || null;
       
+      // Extract thumbnail for visual content
+      const thumbnail = match.metadata?.thumbnail || match.metadata?.image || '';
+      
       return {
         id: match.id,
         score: match.score || 0,
@@ -119,6 +122,7 @@ export async function POST(request: Request) {
           url: url,
           timestamp: timestamp,
           duration: duration,
+          thumbnail: thumbnail,
           ...match.metadata
         }
       }

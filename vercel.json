@@ -1,0 +1,7 @@
+{
+  "name": "rosicrucian-search-engine",
+  "version": 2,
+  "buildCommand": "next build",
+  "devCommand": "next dev",
+  "outputDirectory": ".next"
+}

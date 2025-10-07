@@ -23,6 +23,7 @@ interface SearchResult {
     url?: string
     timestamp?: number | string
     duration?: number
+    thumbnail?: string
   }
 }
 
