@@ -86,6 +86,24 @@ export async function POST(request: Request) {
          content = String(match.metadata?.content || match.metadata?.text || '')
        }
       
+      // Extract file type and path
+      const fileType = match.metadata?.file_type || match.metadata?.type || '';
+      const filePath = match.metadata?.file_path || match.metadata?.source || '';
+      const url = match.metadata?.url || '';
+      
+      // Extract timestamp for video/audio content
+      let timestamp = null;
+      if (match.metadata?.timestamp) {
+        timestamp = match.metadata.timestamp;
+      } else if (match.metadata?.video_timestamp) {
+        timestamp = match.metadata.video_timestamp;
+      } else if (match.metadata?.audio_timestamp) {
+        timestamp = match.metadata.audio_timestamp;
+      }
+      
+      // Extract duration for video/audio content
+      const duration = match.metadata?.duration || null;
+      
       return {
         id: match.id,
         score: match.score || 0,
@@ -95,8 +113,12 @@ export async function POST(request: Request) {
           source: match.metadata?.file_name || match.metadata?.document || match.metadata?.source || match.id || 'Unknown',
           page: match.metadata?.page_label || match.metadata?.page,
           title: match.metadata?.title || match.metadata?.file_name,
-          type: match.metadata?.file_type || match.metadata?.type,
+          type: fileType,
           year: match.metadata?.year,
+          file_path: filePath,
+          url: url,
+          timestamp: timestamp,
+          duration: duration,
           ...match.metadata
         }
       }
