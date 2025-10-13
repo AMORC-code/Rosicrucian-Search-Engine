@@ -191,10 +191,10 @@ export async function POST(request: Request) {
 
     const response = completion.choices[0]?.message?.content || "I couldn't generate a response based on the available information."
 
-    console.log("✨ 🎊 PORTAL TRANSFORMATION COMPLETE!", { 
+    console.log("✨ 🎊 PORTAL TRANSFORMATION COMPLETE!", {
       resultsCount: results.length,
-      hasGraphRAG: results.some(r => r.metadata.graph_score > 0),
-      avgScore: results.reduce((sum, r) => sum + r.score, 0) / results.length
+      hasGraphRAG: results.some((r: any) => r.metadata.graph_score > 0),
+      avgScore: results.reduce((sum: number, r: any) => sum + r.score, 0) / results.length
     })
 
     return NextResponse.json({
