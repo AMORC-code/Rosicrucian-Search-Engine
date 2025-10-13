@@ -171,7 +171,7 @@ export async function POST(request: Request) {
     })
 
     // 🧠 Generate response using OpenAI based on retrieved context
-    const context = results.slice(0, 5).map(r => r.content).join("\n\n")
+    const context = results.slice(0, 5).map((r: any) => r.content).join("\n\n")
     
     const completion = await openai.chat.completions.create({
       model: "gpt-4o",
