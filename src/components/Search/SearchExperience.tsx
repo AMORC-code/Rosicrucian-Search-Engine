@@ -28,6 +28,12 @@ export default function SearchExperience({
   const [error, setError] = React.useState<string | undefined>()
   const { toast } = useToast()
   const [hasSearched, setHasSearched] = React.useState(false)
+  
+  // 🌟 GraphRAG and advanced search options
+  const [useGraphRAG, setUseGraphRAG] = React.useState(false)
+  const [graphWeight, setGraphWeight] = React.useState(0.3)
+  const [maxHops, setMaxHops] = React.useState(2)
+  const [searchMode, setSearchMode] = React.useState<'traditional' | 'graphrag' | 'hybrid'>('traditional')
 
   const handleSearch = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -54,6 +60,10 @@ export default function SearchExperience({
           query: query.trim(),
           mode: "semantic",
           top_k: 10,
+          use_graphrag: useGraphRAG,
+          graph_weight: graphWeight,
+          max_hops: maxHops,
+          search_mode: searchMode,
         }),
       })
 
@@ -133,7 +143,7 @@ export default function SearchExperience({
           initial={{ opacity: 0, scale: 0.95 }}
           animate={{ opacity: 1, scale: 1 }}
           transition={{ delay: 0.3, duration: 0.9 }}
-          className="w-full max-w-3xl mx-auto mb-16"
+          className="w-full max-w-4xl mx-auto mb-16"
         >
           <div className="relative">
             <form onSubmit={handleSearch} className="relative">
@@ -169,6 +179,64 @@ export default function SearchExperience({
                 </div>
               </div>
             </form>
+            
+            {/* 🌟 Advanced Search Options */}
+            <motion.div
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.5, duration: 0.5 }}
+              className="mt-4 flex flex-wrap gap-4 justify-center"
+            >
+              {/* Search Mode Toggle */}
+              <div className="flex items-center space-x-2">
+                <label className="text-sm text-purple-200">Search Mode:</label>
+                <select
+                  value={searchMode}
+                  onChange={(e) => {
+                    const mode = e.target.value as 'traditional' | 'graphrag' | 'hybrid'
+                    setSearchMode(mode)
+                    setUseGraphRAG(mode === 'graphrag' || mode === 'hybrid')
+                  }}
+                  className="px-3 py-1 rounded-lg bg-black/30 text-white border border-purple-500/30 text-sm"
+                >
+                  <option value="traditional">🔍 Traditional</option>
+                  <option value="graphrag">🧠 GraphRAG</option>
+                  <option value="hybrid">⚡ Hybrid</option>
+                </select>
+              </div>
+
+              {/* GraphRAG Options */}
+              {useGraphRAG && (
+                <>
+                  <div className="flex items-center space-x-2">
+                    <label className="text-sm text-purple-200">Graph Weight:</label>
+                    <input
+                      type="range"
+                      min="0"
+                      max="1"
+                      step="0.1"
+                      value={graphWeight}
+                      onChange={(e) => setGraphWeight(parseFloat(e.target.value))}
+                      className="w-20"
+                    />
+                    <span className="text-xs text-purple-300">{graphWeight.toFixed(1)}</span>
+                  </div>
+
+                  <div className="flex items-center space-x-2">
+                    <label className="text-sm text-purple-200">Max Hops:</label>
+                    <select
+                      value={maxHops}
+                      onChange={(e) => setMaxHops(parseInt(e.target.value))}
+                      className="px-2 py-1 rounded bg-black/30 text-white border border-purple-500/30 text-sm"
+                    >
+                      <option value={1}>1 Hop</option>
+                      <option value={2}>2 Hops</option>
+                      <option value={3}>3 Hops</option>
+                    </select>
+                  </div>
+                </>
+              )}
+            </motion.div>
           </div>
         </motion.div>
 

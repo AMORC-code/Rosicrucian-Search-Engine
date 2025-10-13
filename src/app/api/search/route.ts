@@ -2,7 +2,7 @@ import { NextResponse } from "next/server"
 import OpenAI from 'openai'
 
 // 🌐 The Mystical Search Portal - Where Queries Meet Enlightenment
-// This endpoint connects to our AMORC RAG Pipeline using Supabase + Qdrant
+// This endpoint connects directly to Qdrant Cloud for vector search
 
 export async function POST(request: Request) {
   try {
@@ -14,14 +14,14 @@ export async function POST(request: Request) {
       )
     }
 
-    if (!process.env.AMORC_API_URL) {
+    if (!process.env.QDRANT_URL || !process.env.QDRANT_API_KEY) {
       return NextResponse.json(
-        { error: "AMORC_API_URL environment variable is not set" },
+        { error: "QDRANT_URL and QDRANT_API_KEY environment variables must be set" },
         { status: 500 }
       )
     }
 
-    // 🎭 Initialize OpenAI client for response generation
+    // 🎭 Initialize OpenAI client for embeddings and response generation
     const openai = new OpenAI({
       apiKey: process.env.OPENAI_API_KEY,
     })
@@ -38,46 +38,71 @@ export async function POST(request: Request) {
 
     const query = body.query as string
     const topK = body.top_k || body.similarity_top_k || 10
-    const useGraphRAG = body.use_graphrag || false
-    const graphWeight = body.graph_weight || 0.3
-    const maxHops = body.max_hops || 2
-    
-    console.log("🌐 ✨ MYSTICAL SEARCH REQUEST ENTERS THE PORTAL!", { 
-      query: query.substring(0, 100), 
-      topK, 
-      useGraphRAG,
-      graphWeight,
-      maxHops 
+    const matchThreshold = body.match_threshold || 0.5
+
+    console.log("🌐 ✨ MYSTICAL SEARCH REQUEST ENTERS THE PORTAL!", {
+      query: query.substring(0, 100),
+      topK,
+      matchThreshold
     })
 
-    // 🚀 Query our AMORC RAG Pipeline
-    const amorcResponse = await fetch(`${process.env.AMORC_API_URL}/search`, {
+    // 🎨 Generate query embedding using OpenAI
+    const embeddingResponse = await openai.embeddings.create({
+      model: "text-embedding-3-small",
+      input: query.trim(),
+    })
+
+    const queryEmbedding = embeddingResponse.data[0].embedding
+
+    // 🔮 Search Qdrant for similar vectors using REST API
+    const collectionName = process.env.QDRANT_COLLECTION_NAME || "amorc_rag"
+    const qdrantUrl = process.env.QDRANT_URL!
+    const qdrantApiKey = process.env.QDRANT_API_KEY!
+
+    const qdrantSearchResponse = await fetch(`${qdrantUrl}/collections/${collectionName}/points/search`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
+        "api-key": qdrantApiKey,
       },
       body: JSON.stringify({
-        query: query.trim(),
-        match_threshold: 0.5,
-        match_count: topK,
-        hybrid_alpha: 0.5, // Balance between vector and full-text search
-        use_graphrag: useGraphRAG,
-        graph_weight: graphWeight,
-        max_hops: maxHops
+        vector: queryEmbedding,
+        limit: topK,
+        score_threshold: matchThreshold,
+        with_payload: true,
       }),
     })
 
-    if (!amorcResponse.ok) {
-      const errorData = await amorcResponse.json().catch(() => null)
-      throw new Error(
-        errorData?.detail || 
-        errorData?.error || 
-        `AMORC RAG Pipeline error (${amorcResponse.status})`
-      )
+    if (!qdrantSearchResponse.ok) {
+      throw new Error(`Qdrant search failed: ${qdrantSearchResponse.statusText}`)
     }
 
-    const amorcData = await amorcResponse.json()
-    const chunks = amorcData.results || []
+    const qdrantData = await qdrantSearchResponse.json()
+    const searchResults = qdrantData.result || []
+
+    // 🎭 Transform Qdrant results to our format
+    const chunks = searchResults.map((result: any) => {
+      // Extract content from _node_content if it exists (LlamaIndex format)
+      let content = ""
+      if (result.payload?._node_content) {
+        try {
+          const nodeContent = JSON.parse(result.payload._node_content)
+          content = nodeContent.text || ""
+        } catch (e) {
+          content = result.payload._node_content || ""
+        }
+      } else {
+        content = result.payload?.content || ""
+      }
+
+      // Return chunk with all payload fields preserved
+      return {
+        chunk_id: result.id,
+        content,
+        similarity_score: result.score,
+        ...result.payload, // Spread all payload fields (includes deeplinks, thumbnails, etc.)
+      }
+    })
 
     // 🎨 Format results with enhanced metadata and deep linking
     const results = chunks.map((chunk: any, index: number) => {
@@ -179,10 +204,8 @@ export async function POST(request: Request) {
       metadata: {
         total_results: results.length,
         query: query,
-        use_graphrag: useGraphRAG,
-        graph_weight: graphWeight,
-        max_hops: maxHops,
-        search_engine: "AMORC RAG Pipeline (Supabase + Qdrant)",
+        match_threshold: matchThreshold,
+        search_engine: "Qdrant Cloud + Supabase",
         timestamp: new Date().toISOString()
       }
     })
@@ -191,10 +214,10 @@ export async function POST(request: Request) {
     
     // 🌩️ Return a more detailed error response
     return NextResponse.json(
-      { 
+      {
         error: "Failed to fetch search results",
         details: error instanceof Error ? error.message : "Unknown error",
-        search_engine: "AMORC RAG Pipeline (Supabase + Qdrant)"
+        search_engine: "Qdrant Cloud + Supabase"
       },
       { status: 500 }
     )
