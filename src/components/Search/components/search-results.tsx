@@ -22,8 +22,19 @@ interface SearchResult {
     file_path?: string
     url?: string
     timestamp?: number | string
-    duration?: number
+    duration?: number | string
     thumbnail?: string
+    // 🔗 New deeplink fields from backend
+    thumbnail_url?: string
+    pdf_url?: string
+    epub_url?: string
+    deeplink?: string
+    audio_url?: string
+    video_id?: string
+    video_url?: string
+    timestamp_seconds?: number
+    volume?: number
+    issue?: number
   }
 }
 
@@ -83,22 +94,28 @@ const getFileTypeIcon = (type?: string) => {
  */
 const canOpenResource = (result: SearchResult): boolean => {
   const { metadata } = result;
-  
+
+  // Check for new deeplink fields first
+  if (metadata.deeplink || metadata.pdf_url || metadata.epub_url ||
+      metadata.audio_url || metadata.video_url) {
+    return true;
+  }
+
   // PDF files with source or file_path
-  if (metadata.type?.toLowerCase().includes('pdf') && (metadata.source || metadata.file_path)) 
+  if (metadata.type?.toLowerCase().includes('pdf') && (metadata.source || metadata.file_path))
     return true;
-  
+
   // YouTube videos with URL
-  if ((metadata.type?.toLowerCase().includes('video') || metadata.type?.toLowerCase().includes('youtube')) && metadata.url) 
+  if ((metadata.type?.toLowerCase().includes('video') || metadata.type?.toLowerCase().includes('youtube')) && metadata.url)
     return true;
-  
+
   // Audio files with URL
-  if ((metadata.type?.toLowerCase().includes('audio') || metadata.type?.toLowerCase().includes('podcast')) && metadata.url) 
+  if ((metadata.type?.toLowerCase().includes('audio') || metadata.type?.toLowerCase().includes('podcast')) && metadata.url)
     return true;
-  
+
   // External links
   if (metadata.url) return true;
-  
+
   return false;
 };
 
@@ -130,57 +147,86 @@ const getResourceLabel = (result: SearchResult): string => {
 const handleOpenResource = (result: SearchResult) => {
   const { metadata } = result;
   const type = metadata.type?.toLowerCase() || '';
-  
-  // Handle PDF files
+
+  // 🎯 Priority 1: Use deeplink if available (includes timestamps)
+  if (metadata.deeplink) {
+    window.open(metadata.deeplink, '_blank');
+    return;
+  }
+
+  // 🎬 Priority 2: Handle YouTube videos with video_id
+  if (metadata.video_id || metadata.video_url) {
+    const videoUrl = metadata.video_url || `https://www.youtube.com/watch?v=${metadata.video_id}`;
+    const timestamp = metadata.timestamp_seconds || metadata.timestamp;
+
+    if (timestamp && typeof timestamp === 'number') {
+      window.open(`${videoUrl}${videoUrl.includes('?') ? '&' : '?'}t=${Math.floor(timestamp)}`, '_blank');
+    } else {
+      window.open(videoUrl, '_blank');
+    }
+    return;
+  }
+
+  // 🎙️ Priority 3: Handle audio/podcasts
+  if (metadata.audio_url) {
+    window.open(metadata.audio_url, '_blank');
+    return;
+  }
+
+  // 📚 Priority 4: Handle books (prefer EPUB over PDF)
+  if (type.includes('book')) {
+    if (metadata.epub_url) {
+      window.open(metadata.epub_url, '_blank');
+      return;
+    }
+    if (metadata.pdf_url) {
+      window.open(metadata.pdf_url, '_blank');
+      return;
+    }
+  }
+
+  // 📄 Priority 5: Handle PDF files (digests, documents)
+  if (metadata.pdf_url) {
+    const page = metadata.page || 1;
+    window.open(`${metadata.pdf_url}#page=${page}`, '_blank');
+    return;
+  }
+
+  // Legacy handling for backward compatibility
   if (type.includes('pdf')) {
     const pdfPath = metadata.file_path || metadata.source;
     const page = metadata.page || 1;
-    
-    // Open PDF at specific page
     window.open(`${pdfPath}#page=${page}`, '_blank');
     return;
   }
-  
-  // Handle YouTube videos
+
   if ((type.includes('video') || type.includes('youtube')) && metadata.url) {
     let videoUrl = metadata.url;
-    
-    // Add timestamp if available
     if (metadata.timestamp) {
-      // If it's a YouTube URL, add timestamp parameter
-      if (videoUrl.includes('youtube.com') || videoUrl.includes('youtu.be')) {
-        // Convert timestamp to seconds if it's not already
-        let seconds = metadata.timestamp;
-        if (typeof seconds === 'string') {
-          // Parse timestamp format like "1:30" to seconds
-          const parts = seconds.split(':').map(Number);
-          if (parts.length === 2) {
-            seconds = parts[0] * 60 + parts[1];
-          } else if (parts.length === 3) {
-            seconds = parts[0] * 3600 + parts[1] * 60 + parts[2];
-          }
-        }
-        
-        // Add timestamp parameter to URL
-        if (videoUrl.includes('?')) {
-          videoUrl += `&t=${seconds}s`;
-        } else {
-          videoUrl += `?t=${seconds}s`;
+      let seconds = metadata.timestamp;
+      if (typeof seconds === 'string') {
+        const parts = seconds.split(':').map(Number);
+        if (parts.length === 2) {
+          seconds = parts[0] * 60 + parts[1];
+        } else if (parts.length === 3) {
+          seconds = parts[0] * 3600 + parts[1] * 60 + parts[2];
         }
       }
+      if (videoUrl.includes('?')) {
+        videoUrl += `&t=${seconds}s`;
+      } else {
+        videoUrl += `?t=${seconds}s`;
+      }
     }
-    
     window.open(videoUrl, '_blank');
     return;
   }
-  
-  // Handle audio files
+
   if ((type.includes('audio') || type.includes('podcast')) && metadata.url) {
     window.open(metadata.url, '_blank');
     return;
   }
-  
-  // Handle any URL as fallback
+
   if (metadata.url) {
     window.open(metadata.url, '_blank');
     return;
@@ -262,11 +308,11 @@ export function SearchResults({
               <div className="flex gap-4">
                 {/* Resource Preview */}
                 <div className="flex-shrink-0">
-                  <ResourcePreview 
+                  <ResourcePreview
                     type={result.metadata.type || ""}
-                    url={result.metadata.url}
+                    url={result.metadata.url || result.metadata.deeplink || result.metadata.pdf_url}
                     title={result.metadata.title}
-                    thumbnail={result.metadata.thumbnail as string}
+                    thumbnail={(result.metadata.thumbnail_url || result.metadata.thumbnail) as string}
                     onClick={() => canOpenResource(result) && handleOpenResource(result)}
                   />
                 </div>
@@ -303,11 +349,21 @@ export function SearchResults({
                           {result.metadata.year}
                         </span>
                       )}
+                      {result.metadata.volume && result.metadata.issue && (
+                        <span className="rounded-full bg-amber-500/10 px-2 py-0.5 text-xs font-medium text-amber-500">
+                          Vol. {result.metadata.volume}, Issue {result.metadata.issue}
+                        </span>
+                      )}
                       {result.metadata.duration && (
                         <span className="rounded-full bg-blue-500/10 px-2 py-0.5 text-xs font-medium text-blue-500">
-                          {typeof result.metadata.duration === 'number' 
+                          {typeof result.metadata.duration === 'number'
                             ? formatDuration(result.metadata.duration)
                             : result.metadata.duration}
+                        </span>
+                      )}
+                      {result.metadata.timestamp_seconds && (
+                        <span className="rounded-full bg-purple-500/10 px-2 py-0.5 text-xs font-medium text-purple-500">
+                          @ {formatDuration(result.metadata.timestamp_seconds)}
                         </span>
                       )}
                     </div>

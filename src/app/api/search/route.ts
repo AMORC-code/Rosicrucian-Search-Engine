@@ -1,19 +1,12 @@
 import { NextResponse } from "next/server"
-import { Pinecone } from '@pinecone-database/pinecone'
 import OpenAI from 'openai'
 
-const INDEX_NAME = "amorc-documents"
+// 🌐 The Mystical Search Portal - Where Queries Meet Enlightenment
+// This endpoint connects to our AMORC RAG Pipeline using Supabase + Qdrant
 
 export async function POST(request: Request) {
   try {
-    // Check for required environment variables
-    if (!process.env.PINECONE_API_KEY) {
-      return NextResponse.json(
-        { error: "PINECONE_API_KEY environment variable is not set" },
-        { status: 500 }
-      )
-    }
-
+    // 🌟 Check for required environment variables
     if (!process.env.OPENAI_API_KEY) {
       return NextResponse.json(
         { error: "OPENAI_API_KEY environment variable is not set" },
@@ -21,18 +14,21 @@ export async function POST(request: Request) {
       )
     }
 
-    // Initialize Pinecone and OpenAI clients
-    const pinecone = new Pinecone({
-      apiKey: process.env.PINECONE_API_KEY,
-    })
+    if (!process.env.AMORC_API_URL) {
+      return NextResponse.json(
+        { error: "AMORC_API_URL environment variable is not set" },
+        { status: 500 }
+      )
+    }
 
+    // 🎭 Initialize OpenAI client for response generation
     const openai = new OpenAI({
       apiKey: process.env.OPENAI_API_KEY,
     })
 
     const body = await request.json()
     
-    // Validate request body
+    // 🔍 Validate request body
     if (!body || typeof body !== "object" || !body.query) {
       return NextResponse.json(
         { error: "Invalid request body - query is required" },
@@ -41,98 +37,119 @@ export async function POST(request: Request) {
     }
 
     const query = body.query as string
-    const topK = body.top_k || body.similarity_top_k || 5
+    const topK = body.top_k || body.similarity_top_k || 10
+    const useGraphRAG = body.use_graphrag || false
+    const graphWeight = body.graph_weight || 0.3
+    const maxHops = body.max_hops || 2
     
-    console.log("Search request:", { query, topK })
-
-    // Generate embedding for the query
-    const embeddingResponse = await openai.embeddings.create({
-      model: "text-embedding-ada-002",
-      input: query,
+    console.log("🌐 ✨ MYSTICAL SEARCH REQUEST ENTERS THE PORTAL!", { 
+      query: query.substring(0, 100), 
+      topK, 
+      useGraphRAG,
+      graphWeight,
+      maxHops 
     })
 
-    const queryEmbedding = embeddingResponse.data[0].embedding
-
-    // Search Pinecone index
-    const index = pinecone.index(INDEX_NAME)
-    const searchResponse = await index.query({
-      vector: queryEmbedding,
-      topK: topK,
-      includeMetadata: true,
-      includeValues: false,
+    // 🚀 Query our AMORC RAG Pipeline
+    const amorcResponse = await fetch(`${process.env.AMORC_API_URL}/search`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        query: query.trim(),
+        match_threshold: 0.5,
+        match_count: topK,
+        hybrid_alpha: 0.5, // Balance between vector and full-text search
+        use_graphrag: useGraphRAG,
+        graph_weight: graphWeight,
+        max_hops: maxHops
+      }),
     })
 
+    if (!amorcResponse.ok) {
+      const errorData = await amorcResponse.json().catch(() => null)
+      throw new Error(
+        errorData?.detail || 
+        errorData?.error || 
+        `AMORC RAG Pipeline error (${amorcResponse.status})`
+      )
+    }
 
+    const amorcData = await amorcResponse.json()
+    const chunks = amorcData.results || []
 
-    // Format results to match expected response structure
-    const results = searchResponse.matches?.map((match) => {
-      let text = ''
-      let content = ''
-      
-      // Extract text from _node_content if it exists
-      if (match.metadata?._node_content) {
-        try {
-          const nodeContent = JSON.parse(match.metadata._node_content as string)
-          text = nodeContent.text || ''
-          content = nodeContent.text || ''
-        } catch (e) {
-           console.error('Error parsing _node_content:', e)
-           text = String(match.metadata._node_content) || ''
-           content = String(match.metadata._node_content) || ''
-        }
-      } else {
-         // Fallback to other content fields
-         text = String(match.metadata?.content || match.metadata?.text || '')
-         content = String(match.metadata?.content || match.metadata?.text || '')
-       }
-      
-      // Extract file type and path
-      const fileType = match.metadata?.file_type || match.metadata?.type || '';
-      const filePath = match.metadata?.file_path || match.metadata?.source || '';
-      const url = match.metadata?.url || '';
-      
-      // Extract timestamp for video/audio content
-      let timestamp = null;
-      if (match.metadata?.timestamp) {
-        timestamp = match.metadata.timestamp;
-      } else if (match.metadata?.video_timestamp) {
-        timestamp = match.metadata.video_timestamp;
-      } else if (match.metadata?.audio_timestamp) {
-        timestamp = match.metadata.audio_timestamp;
+    // 🎨 Format results with enhanced metadata and deep linking
+    const results = chunks.map((chunk: any, index: number) => {
+      // 🌟 Extract rich metadata
+      const metadata = {
+        source: chunk.document_name || chunk.title || 'Unknown',
+        page: chunk.page_start || chunk.page_label,
+        title: chunk.title || chunk.document_name || 'Unknown',
+        type: chunk.source_type || chunk.content_type || chunk.genre || 'unknown',
+        year: chunk.year,
+        author: chunk.author,
+        genre: chunk.genre,
+        language: chunk.language,
+        chunk_index: chunk.chunk_index,
+        total_chunks: chunk.total_chunks || 1,
+        
+        // 🔗 Deep linking information
+        jump_link: chunk.jump_link,
+        source_url: chunk.source_url,
+        
+        // 📊 GraphRAG information (if available)
+        graph_score: chunk.graph_score,
+        combined_score: chunk.combined_score,
+        graph_info: chunk.graph_info,
+        
+        // 🎯 Similarity scores
+        similarity_score: chunk.similarity_score || chunk.score || 0,
+        
+        // 📱 Additional metadata
+        content_type: chunk.content_type,
+        file_type: chunk.filetype,
+        created_at: chunk.created_at,
+        updated_at: chunk.updated_at,
+        
+        // 🖼️ Thumbnail support (if available)
+        thumbnail_url: chunk.thumbnail_url,
+        
+        // ⏱️ Time-based content (for audio/video)
+        start_time: chunk.start_time,
+        end_time: chunk.end_time,
+        timestamp_seconds: chunk.timestamp_seconds,
+        duration: chunk.duration,
+        
+        // 🎬 Video-specific
+        video_id: chunk.video_id,
+        deeplink: chunk.deeplink,
+        audio_url: chunk.audio_url,
+        
+        // 📚 Document-specific
+        volume: chunk.volume,
+        issue: chunk.issue,
+        pdf_url: chunk.pdf_url,
+        epub_url: chunk.epub_url,
+        
+        // 🎪 Raw chunk data for debugging
+        raw_chunk: chunk
       }
-      
-      // Extract duration for video/audio content
-      const duration = match.metadata?.duration || null;
-      
-      // Extract thumbnail for visual content
-      const thumbnail = match.metadata?.thumbnail || match.metadata?.image || '';
-      
+
       return {
-        id: match.id,
-        score: match.score || 0,
-        text,
-        content,
-        metadata: {
-          source: match.metadata?.file_name || match.metadata?.document || match.metadata?.source || match.id || 'Unknown',
-          page: match.metadata?.page_label || match.metadata?.page,
-          title: match.metadata?.title || match.metadata?.file_name,
-          type: fileType,
-          year: match.metadata?.year,
-          file_path: filePath,
-          url: url,
-          timestamp: timestamp,
-          duration: duration,
-          thumbnail: thumbnail,
-          ...match.metadata
-        }
+        id: chunk.chunk_id,
+        score: chunk.similarity_score || chunk.score || 0,
+        text: chunk.content || chunk.text,
+        content: chunk.content || chunk.text,
+        metadata
       }
-    }) || []
+    })
 
-    // Generate response using OpenAI based on retrieved context
-    const context = results.slice(0, 3).map(r => r.content).join("\n\n")
+    // 🧠 Generate response using OpenAI based on retrieved context
+    const context = results.slice(0, 5).map(r => r.content).join("\n\n")
     
     const completion = await openai.chat.completions.create({
-      model: "gpt-4",
+      model: "gpt-4o",
       messages: [
         {
           role: "system",
@@ -143,25 +160,41 @@ export async function POST(request: Request) {
           content: `Sacred Texts and Sources: ${context}\n\nSeeker's Inquiry: ${query}\n\nAs a Rosicrucian scholar, please illuminate this inquiry by drawing wisdom from the provided sources. Reference specific documents, page numbers, or teachings when possible. Let your response guide the seeker toward deeper understanding while honoring the mystical tradition of the Rose Cross.`
         }
       ],
-      max_tokens: 500,
+      max_tokens: 800,
       temperature: 0.7,
     })
 
     const response = completion.choices[0]?.message?.content || "I couldn't generate a response based on the available information."
 
+    console.log("✨ 🎊 PORTAL TRANSFORMATION COMPLETE!", { 
+      resultsCount: results.length,
+      hasGraphRAG: results.some(r => r.metadata.graph_score > 0),
+      avgScore: results.reduce((sum, r) => sum + r.score, 0) / results.length
+    })
+
     return NextResponse.json({
       response,
       sources: results,
-      results // Keep for backward compatibility
+      results, // Keep for backward compatibility
+      metadata: {
+        total_results: results.length,
+        query: query,
+        use_graphrag: useGraphRAG,
+        graph_weight: graphWeight,
+        max_hops: maxHops,
+        search_engine: "AMORC RAG Pipeline (Supabase + Qdrant)",
+        timestamp: new Date().toISOString()
+      }
     })
   } catch (error) {
-    console.error("Search API error:", error)
+    console.error("💥 😭 SEARCH QUEST TEMPORARILY HALTED!", error)
     
-    // Return a more detailed error response
+    // 🌩️ Return a more detailed error response
     return NextResponse.json(
       { 
         error: "Failed to fetch search results",
-        details: error instanceof Error ? error.message : "Unknown error"
+        details: error instanceof Error ? error.message : "Unknown error",
+        search_engine: "AMORC RAG Pipeline (Supabase + Qdrant)"
       },
       { status: 500 }
     )
